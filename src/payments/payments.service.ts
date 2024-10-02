@@ -1,15 +1,15 @@
 import { Injectable } from '@nestjs/common';
-import { envs } from 'src/config';
-import Stripe from 'stripe';
-import { PaymentSessionDto } from './dto/payment-session.dto';
 import { Request, Response } from 'express';
+import Stripe from 'stripe';
+import { envs } from 'src/config';
+import { PaymentSessionDto } from './dto/payment-session.dto';
 
 @Injectable()
 export class PaymentsService {
   private readonly stripe = new Stripe(envs.stripeSecret);
 
   async createPaymentSession(paymentSessionDto: PaymentSessionDto) {
-    const { currency, items } = paymentSessionDto;
+    const { currency, items, orderId } = paymentSessionDto;
 
     const lineItems = items.map((item) => {
       return {
@@ -27,12 +27,14 @@ export class PaymentsService {
     const session = await this.stripe.checkout.sessions.create({
       //* colocar aquí el ID de la orden
       payment_intent_data: {
-        metadata: {},
+        metadata: {
+          orderId: orderId,
+        },
       },
       line_items: lineItems,
       mode: 'payment',
-      success_url: 'http://localhost:3003/payments/success',
-      cancel_url: 'http://localhost:3003/payments/cancel',
+      success_url: envs.stripeSuccessUrl,
+      cancel_url: envs.stripeCancelUrl,
     });
     return session;
   }
@@ -43,7 +45,11 @@ export class PaymentsService {
 
     let event: Stripe.Event;
 
-    const endpointSecret = 'whsec_8b8e1305b71cbe45e0f5acfaf4627f009167fb38c5fae5a02e490ae25a100e54';
+    //* End Point Testing
+    // const endpointSecret = 'whsec_8b8e1305b71cbe45e0f5acfaf4627f009167fb38c5fae5a02e490ae25a100e54';
+
+    //* End Point Real
+    const endpointSecret = envs.stripeEndpointSecret;
 
     try {
       event = this.stripe.webhooks.constructEvent(req['rawBody'], sig, endpointSecret);
@@ -52,8 +58,21 @@ export class PaymentsService {
       return;
     }
 
-    console.log(event);
-
+    // console.log({ EVENTS: { event } });
+    switch (event.type) {
+      case 'charge.succeeded':
+        const chargeSucceeded = event.data.object;
+        //TODO: Llamar nuestro microservicio
+        // console.log({
+        //   metadata: chargeSucceeded.metadata,
+        // });
+        // console.log({ metadata: chargeSucceeded.metadata, ...event });
+        const { orderId } = chargeSucceeded.metadata;
+        console.log({ orderId, ...event });
+        break;
+      default:
+        console.log(`Event ${event.type} not handled`);
+    }
     return res.status(200).json({ sig });
   }
 }
